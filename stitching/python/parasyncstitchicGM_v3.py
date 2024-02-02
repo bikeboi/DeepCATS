@@ -35,7 +35,6 @@ Important updates:
 ################################################################################
 """
 
-import cv2
 import os
 import sys
 import warnings
@@ -46,10 +45,11 @@ import subprocess
 import shutil
 import re
 import tempfile
-import random
 from multiprocessing import Pool, cpu_count
 from functools import partial
 from datetime import date
+
+import cv2
 import numpy as np
 import tifffile
 from PIL import Image
@@ -60,29 +60,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 warnings.simplefilter('ignore', Image.DecompressionBombWarning)
 Image.MAX_IMAGE_PIXELS = 1000000000
 
-#=============================================================================================
-# Slack notification
-#=============================================================================================
-
-def slack_message(text, channel, username):
-    from urllib import request, parse
-    import json
-
-    post = {
-            "text": "{0}".format(text),
-            "channel": "{0}".format(channel),
-            "username": "{0}".format(username),
-            "icon_url": "https://github.com/gm515/gm515.github.io/blob/master/Images/imperialstplogo.png?raw=true"
-            }
-
-    try:
-        json_data = json.dumps(post)
-        req = request.Request('https://hooks.slack.com/services/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',
-            data=json_data.encode('ascii'),
-            headers={'Content-Type': 'application/json'})
-        resp = request.urlopen(req)
-    except Exception as em:
-        print("EXCEPTION: " + str(em))
 
 #=============================================================================================
 # Function to load images in parallel
@@ -120,81 +97,9 @@ def get_platform():
 
     return platforms[sys.platform]
 
-#=============================================================================================
-# Generate an intensity correction tile
-#=============================================================================================
-#"""" There's another version of this function, making this redundant
-def generate_corr(tcpath, scanid, startsec, endsec):
-    """Generate intensity correction tile"""
-    #Generate all possible folders in the scan directory
-    folderlist = []
-    for section in range(startsec,endsec+1,1):
-        if section <= 9:
-            sectiontoken = '000'+str(section)
-        elif section <= 99:
-            sectiontoken = '00'+str(section)
-        else:
-            sectiontoken = '0'+str(section)
-
-        folderlist.append(scanid+'-'+sectiontoken)
-
-    # Generate all possible tile paths for the channel in scan directory
-    tilelist = []
-    for folder in folderlist:
-        tilelist += glob.glob(os.path.join(tcpath, folder, '*_0'+channel+'.tif'))
-
-    average_num = 500
-    if len(tilelist) < average_num:
-        average_num = len(tilelist)
-
-    print ('Generating correction tile from n='+str(average_num)+' of '+str(len(tilelist))+' total tiles.')
-
-    tilelist = random.sample(tilelist, average_num)
-
-    size = Image.open(tilelist[0]).size
-    cropstart = int(round(0.014*size[0])) #0.0096 but leaves a bit too much on edge
-    cropend = int(round(size[0]-cropstart+1))
-
-    img_arr = np.array([np.array(Image.open(file).crop((cropstart, cropstart, cropend, cropend)).rotate(90)) for file in tilelist])
-    img_arr = img_arr.astype(np.float32)
-
-    # Average image
-    img_arr_nan = img_arr
-    img_arr_nan[img_arr_nan==0] = np.nan
-    avgimage = np.nanmean(img_arr_nan, axis=0)
-
-    # Image.fromarray((255*avgimage/np.max(avgimage)).astype(np.uint8)).save('/Users/gm515/Desktop/0-average-tile.tif')
-
-    # Blur the result to remove random artefacts
-    avgimage = cv2.GaussianBlur(avgimage, (1501,1501), 0)
-
-    # Image.fromarray((255*avgimage/np.max(avgimage)).astype(np.uint8)).save('/Users/gm515/Desktop/1-gaussian-tile.tif')
-
-    padsize = 144
-    weight_func = lambda x : np.sqrt(padsize**2 - x**2)/padsize
-    weight = np.flip(np.array([weight_func(x) for x in range(0, padsize+1)]))
-
-    # Normalise the average image so all we need to do is multiply each tile by the correction (returned)
-    avgimage = avgimage/np.max(avgimage)
-    avgimage = 2-avgimage
-
-    # Image.fromarray((255*avgimage/np.max(avgimage)).astype(np.uint8)).save('/Users/gm515/Desktop/2-correction-tile.tif')
-
-    # Scale the pad area by the weight
-    copy = avgimage
-    for pos in np.flip(range(padsize+1)):
-        avgimage[pos,:] = copy[pos,:]*weight[pos]
-        avgimage[-pos,:] = copy[-pos,:]*weight[pos]
-        avgimage[:,pos] = copy[:,pos]*weight[pos]
-        avgimage[:,-pos] = copy[:,-pos]*weight[pos]
-
-    # Image.fromarray((255*avgimage/np.max(avgimage)).astype(np.uint8)).save('/Users/gm515/Desktop/3-feathered-tile.tif')
-
-    return avgimage
-#"""
 
 #=============================================================================================
-# Generate an intensity correction tile version 2 using flat field
+# Generate an intensity correction tile (version 2 using flat field)
 #=============================================================================================
 def generate_corr_v2(avg_tile_path):
     avgimage = Image.open(avg_tile_path)
@@ -292,6 +197,12 @@ if __name__ == '__main__':
         else:
             downsize = float(downsize)
 
+    """
+    NOTE: There's probably a smarter way of parsing the Mosaic
+    file. It consists of lines of the form "[string]:[int|float|date]" which
+    is very simple. Parsing it into a Dict and looking up the terms
+    from there would be easy, but maybe more effort than it's worth.
+    """
     # Search the mosaic file for remaining parameters
     mosaicfile = glob.glob(os.path.join(tcpath, 'Mosaic*.txt'))[0]
     with open(mosaicfile, 'r') as f:
@@ -356,6 +267,7 @@ if __name__ == '__main__':
     tstart = time.time()
 
     # Check that data exists
+    ## This piece of code does checking 
     for section in range(startsec,endsec+1,1):
         if section <= 9:
             sectiontoken = '000'+str(section)
@@ -509,4 +421,3 @@ if __name__ == '__main__':
 
     print ('')
     print (text)
-    slack_message(text, '#stitching', 'Stitching')
