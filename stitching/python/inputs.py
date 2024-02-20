@@ -28,21 +28,39 @@ class MosaicFileParams(TypedDict):
     n_layers: int
 
 
+# Wrapper for validation functions that's useful
+class Validation:
+    def __init__(self) -> None:
+        self.funcs = []
+
+    def construct_func(self):
+        fn_0 = lambda x: True
+
 # Input Validators
-def make_validator(*args, **kwargs):
-    return Validator.from_callable(*args, move_cursor_to_end=True, **kwargs)
+def make_validator(f, **kwargs):
+    return Validator.from_callable(f, move_cursor_to_end=True, **kwargs)
+
+def make_type_validatotr(typ, **kwargs):
+    def f(x):
+        try:
+            x_ = typ(x)
+            return isinstance(x_, typ)
+        except ValueError:
+            return False
+    return make_validator(f, **kwargs)
+    
 
 
 PATH_EXISTS = make_validator(
     lambda s: Path(s).exists(follow_symlinks=True) and Path(s).is_dir(),
     error_message='Directory does not exist',
 )
-IS_INT = make_validator(
-    lambda x: isinstance(x, int),
+IS_INT = make_type_validator(
+    int,
     error_message='Please enter an integer'
 )
 IS_FLOAT = make_validator(
-    lambda x: isinstance(x, float),
+    float,
     error_message='Please enter a number'
 )
 IS_PERCENTAGE = make_validator(
